@@ -2,16 +2,15 @@
 # Auto-deploys Agent Architect to GitHub Pages on every push to main.
 #
 # One-time setup (after first push):
-#   1. Go to your repo on GitHub
-#   2. Settings → Pages → "Build and deployment"
-#   3. Source: select "GitHub Actions"
-#   4. Push to main, or manually run this workflow from the Actions tab
-#   5. Live link: https://YOUR_USERNAME.github.io/agent-architect/
+#   1. Repo Settings → Pages → "Build and deployment"
+#   2. Source: select "GitHub Actions"
+#   3. Push to main, OR manually run from Actions tab
+#   4. Live link: https://YOUR_USERNAME.github.io/REPO_NAME/
 #
-# If your repo name is NOT "agent-architect", update BASE_PATH below to match.
+# Works regardless of repo name (relative base path in vite.config.js).
 #
 
-name: Deploy Agent Architect to GitHub Pages
+name: Deploy to GitHub Pages
 
 on:
   push:
@@ -44,11 +43,10 @@ jobs:
         run: npm ci || npm install
 
       - name: Build
-        env:
-          # Match this to your GitHub repo name. Default is /agent-architect/.
-          # If you renamed the repo, update this value or override at the workflow level.
-          BASE_PATH: /${{ github.event.repository.name }}/
         run: npm run build
+
+      - name: Copy 404.html for SPA routing
+        run: cp dist/index.html dist/404.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
