@@ -1905,6 +1905,13 @@ function useStore() {
     setCards(cs => cs.map(c => c.cardId === activeId ? { ...c, ...patch } : c));
   };
 
+  // Patch any card by id, not just the active one. Used for kanban operations
+  // (move stage) and tracker bulk updates where we don't want to switch the
+  // active card just to edit it.
+  const updateCard = (id, patch) => {
+    setCards(cs => cs.map(c => c.cardId === id ? { ...c, ...patch } : c));
+  };
+
   const create = (overrides = {}) => {
     const c = newCard(overrides);
     setCards(cs => [c, ...cs]);
@@ -1938,7 +1945,7 @@ function useStore() {
     setActiveId(newActiveId || newCards[0].cardId);
   };
 
-  return { cards, active, activeId, setActiveId, update, create, remove, reset, replaceAll, loaded, savedAt };
+  return { cards, active, activeId, setActiveId, update, updateCard, create, remove, reset, replaceAll, loaded, savedAt };
 }
 
 /* When idea changes, reflect inferred fields into the card.
@@ -8531,6 +8538,35 @@ function TrackerPanel({ store, setView }) {
   const [stages, setStages] = useState(DEFAULT_PIPELINE_STAGES);
   const [layout, setLayout] = useState("board"); // board | scatter | gantt | calendar
 
+  // Which card has its "move to stage" menu open. Null = no menu open.
+  const [moveMenuCardId, setMoveMenuCardId] = useState(null);
+  // Which stage is being hovered during a drag-and-drop operation. Null = no drag in progress.
+  const [dragOverStage, setDragOverStage] = useState(null);
+  // The card currently being dragged. Null = no drag in progress.
+  const [draggingCardId, setDraggingCardId] = useState(null);
+
+  // Close the move menu when clicking outside it
+  useEffect(() => {
+    if (!moveMenuCardId) return;
+    const handler = (e) => {
+      if (!e.target.closest || !e.target.closest('[data-move-menu]')) {
+        setMoveMenuCardId(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [moveMenuCardId]);
+
+  // Move a card to a different stage. Works for any card by id.
+  const moveCardToStage = (cardId, targetStageId) => {
+    if (store.updateCard) {
+      store.updateCard(cardId, { stageId: targetStageId });
+    }
+    setMoveMenuCardId(null);
+    setDraggingCardId(null);
+    setDragOverStage(null);
+  };
+
   // Persist stages to window.storage under a separate key, so the user can
   // rename them (e.g. for RTO, support, ops) and the change persists.
   const STAGES_KEY = "prompt-architect:stages:v1";
@@ -8730,8 +8766,39 @@ function TrackerPanel({ store, setView }) {
             const workflows = byStage[stage.id] || [];
             const dist = levelDistribution(workflows);
             const avg = avgAutonomy(workflows);
+            const isDragOver = dragOverStage === stage.id;
             return (
-              <Card key={stage.id} padding="14px 14px" style={{ minHeight: 220, display: "flex", flexDirection: "column" }}>
+              <div
+                key={stage.id}
+                onDragOver={(e) => {
+                  // Required, otherwise onDrop won't fire
+                  if (draggingCardId) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    if (dragOverStage !== stage.id) setDragOverStage(stage.id);
+                  }
+                }}
+                onDragLeave={(e) => {
+                  // Only clear if we're actually leaving the stage card, not entering a child
+                  if (e.currentTarget.contains(e.relatedTarget)) return;
+                  if (dragOverStage === stage.id) setDragOverStage(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const cardId = (e.dataTransfer && e.dataTransfer.getData("text/plain")) || draggingCardId;
+                  if (cardId) moveCardToStage(cardId, stage.id);
+                }}
+                style={{
+                  outline: isDragOver ? `2px dashed ${T.primary}` : "none",
+                  outlineOffset: isDragOver ? -2 : 0,
+                  borderRadius: 12,
+                  transition: "outline 0.12s ease"
+                }}
+              >
+              <Card padding="14px 14px" style={{
+                minHeight: 220, display: "flex", flexDirection: "column",
+                background: isDragOver ? T.primarySoft : undefined
+              }}>
                 <div style={{ paddingBottom: 10, borderBottom: `1px solid ${T.border}`, marginBottom: 10 }}>
                   <input
                     value={stage.label}
@@ -8754,8 +8821,12 @@ function TrackerPanel({ store, setView }) {
                 {/* Workflow cards */}
                 <div style={{ flex: 1 }}>
                   {workflows.length === 0 && (
-                    <div style={{ fontSize: 11.5, color: T.textLow, fontFamily: "'Inter', sans-serif", fontStyle: "italic", padding: "6px 0" }}>
-                      No workflows here yet.
+                    <div style={{
+                      fontSize: 11.5, color: dragOverStage === stage.id ? T.primary : T.textLow,
+                      fontFamily: "'Inter', sans-serif", fontStyle: "italic", padding: "6px 0",
+                      transition: "color 0.15s ease"
+                    }}>
+                      {dragOverStage === stage.id ? "Drop to move here" : "No workflows here yet."}
                     </div>
                   )}
                   {workflows.map(w => {
@@ -8764,42 +8835,152 @@ function TrackerPanel({ store, setView }) {
                     const tgt = w.targetLevel  || "L1";
                     const curHex = cur === "L0" ? T.textHi : (LEVELS.find(l => l.id === cur)?.hex || T.textLow);
                     const tgtHex = LEVELS.find(l => l.id === tgt)?.hex || T.primary;
+                    const menuOpen = moveMenuCardId === w.cardId;
+                    const isDragging = draggingCardId === w.cardId;
                     return (
-                      <button
+                      <div
                         key={w.cardId}
-                        onClick={() => { store.setActiveId(w.cardId); setView("wizard"); }}
-                        style={{
-                          width: "100%", textAlign: "left",
-                          background: isActive ? T.primarySoft : T.bg,
-                          border: isActive ? `1px solid ${T.primary}` : `1px solid ${T.border}`,
-                          borderRadius: 8, padding: "8px 10px",
-                          marginBottom: 6, cursor: "pointer",
-                          transition: "all 0.15s ease",
-                          fontFamily: "'Inter', sans-serif"
+                        data-move-menu={menuOpen ? "open" : undefined}
+                        draggable
+                        onDragStart={(e) => {
+                          setDraggingCardId(w.cardId);
+                          // Tell the browser this is a "move" operation
+                          if (e.dataTransfer) {
+                            e.dataTransfer.effectAllowed = "move";
+                            e.dataTransfer.setData("text/plain", w.cardId);
+                          }
                         }}
-                        onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = T.bgWash; }}
-                        onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = T.bg; }}
+                        onDragEnd={() => {
+                          setDraggingCardId(null);
+                          setDragOverStage(null);
+                        }}
+                        style={{
+                          position: "relative",
+                          marginBottom: 6,
+                          opacity: isDragging ? 0.4 : 1,
+                          transition: "opacity 0.15s ease"
+                        }}
                       >
-                        <div style={{
-                          fontSize: 12.5, fontWeight: 600, color: T.textHi,
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
-                        }}>
-                          {w.cardName || "Untitled"}
+                        <div style={{ display: "flex", alignItems: "stretch", gap: 2 }}>
+                          <button
+                            type="button"
+                            onClick={() => { store.setActiveId(w.cardId); setView("wizard"); }}
+                            style={{
+                              flex: 1, minWidth: 0, textAlign: "left",
+                              background: isActive ? T.primarySoft : T.bg,
+                              border: isActive ? `1px solid ${T.primary}` : `1px solid ${T.border}`,
+                              borderRadius: 8, padding: "8px 10px",
+                              cursor: "pointer",
+                              transition: "all 0.15s ease",
+                              fontFamily: "'Inter', sans-serif"
+                            }}
+                            onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = T.bgWash; }}
+                            onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = T.bg; }}
+                          >
+                            <div style={{
+                              fontSize: 12.5, fontWeight: 600, color: T.textHi,
+                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+                            }}>
+                              {w.cardName || "Untitled"}
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
+                              <span style={{
+                                fontSize: 9, padding: "1px 5px", borderRadius: 3,
+                                background: curHex, color: "#FFFFFF",
+                                fontFamily: "'JetBrains Mono', monospace", fontWeight: 700
+                              }}>{cur}</span>
+                              <span style={{ fontSize: 10, color: T.textLow }}>→</span>
+                              <span style={{
+                                fontSize: 9, padding: "1px 5px", borderRadius: 3,
+                                background: tgtHex, color: "#FFFFFF",
+                                fontFamily: "'JetBrains Mono', monospace", fontWeight: 700
+                              }}>{tgt}</span>
+                            </div>
+                          </button>
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setMoveMenuCardId(menuOpen ? null : w.cardId);
+                            }}
+                            aria-label={`Move ${w.cardName || "workflow"} to a different stage`}
+                            aria-haspopup="menu"
+                            aria-expanded={menuOpen}
+                            title="Move to a different stage"
+                            style={{
+                              flexShrink: 0, width: 28,
+                              background: menuOpen ? T.primarySoft : "transparent",
+                              border: `1px solid ${menuOpen ? T.primary : T.border}`,
+                              borderRadius: 6, color: menuOpen ? T.primary : T.textLow,
+                              cursor: "pointer", padding: 0,
+                              fontSize: 14, fontWeight: 700,
+                              fontFamily: "'Inter', sans-serif",
+                              transition: "all 0.15s ease",
+                              display: "flex", alignItems: "center", justifyContent: "center"
+                            }}
+                          >⋯</button>
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
-                          <span style={{
-                            fontSize: 9, padding: "1px 5px", borderRadius: 3,
-                            background: curHex, color: "#FFFFFF",
-                            fontFamily: "'JetBrains Mono', monospace", fontWeight: 700
-                          }}>{cur}</span>
-                          <span style={{ fontSize: 10, color: T.textLow }}>→</span>
-                          <span style={{
-                            fontSize: 9, padding: "1px 5px", borderRadius: 3,
-                            background: tgtHex, color: "#FFFFFF",
-                            fontFamily: "'JetBrains Mono', monospace", fontWeight: 700
-                          }}>{tgt}</span>
-                        </div>
-                      </button>
+
+                        {/* Move-to-stage popover menu */}
+                        {menuOpen && (
+                          <div
+                            data-move-menu="open"
+                            role="menu"
+                            style={{
+                              position: "absolute", top: "calc(100% + 4px)", right: 0,
+                              minWidth: 180,
+                              background: T.bg, border: `1px solid ${T.border}`,
+                              borderRadius: 8, padding: 4, zIndex: 50,
+                              boxShadow: "0 8px 24px rgba(12,22,47,0.12)"
+                            }}
+                          >
+                            <div style={{
+                              padding: "6px 10px",
+                              fontSize: 9, letterSpacing: "0.14em", fontWeight: 700,
+                              color: T.textLow, textTransform: "uppercase",
+                              fontFamily: "'JetBrains Mono', monospace"
+                            }}>
+                              MOVE TO
+                            </div>
+                            {stages.map(s => {
+                              const here = s.id === (w.stageId || stages[0].id);
+                              return (
+                                <button
+                                  key={s.id}
+                                  type="button"
+                                  role="menuitem"
+                                  disabled={here}
+                                  onClick={() => moveCardToStage(w.cardId, s.id)}
+                                  style={{
+                                    width: "100%", textAlign: "left",
+                                    background: "transparent",
+                                    border: "none",
+                                    borderRadius: 6,
+                                    padding: "8px 10px",
+                                    fontSize: 12.5, fontWeight: here ? 700 : 500,
+                                    color: here ? T.primary : T.textHi,
+                                    fontFamily: "'Inter', sans-serif",
+                                    cursor: here ? "default" : "pointer",
+                                    opacity: here ? 0.7 : 1,
+                                    display: "flex", alignItems: "center", justifyContent: "space-between"
+                                  }}
+                                  onMouseEnter={e => { if (!here) e.currentTarget.style.background = T.bgWash; }}
+                                  onMouseLeave={e => { if (!here) e.currentTarget.style.background = "transparent"; }}
+                                >
+                                  <span>{s.label}</span>
+                                  {here && (
+                                    <span style={{
+                                      fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
+                                      color: T.primary, fontFamily: "'JetBrains Mono', monospace"
+                                    }}>HERE</span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
@@ -8850,6 +9031,7 @@ function TrackerPanel({ store, setView }) {
                   + Add workflow
                 </button>
               </Card>
+              </div>
             );
           })}
         </div>
