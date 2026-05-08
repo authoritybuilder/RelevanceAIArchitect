@@ -1,0 +1,122 @@
+# Architecture
+
+For people who want to fork, modify, or extend Agent Architect.
+
+## The single-file decision
+
+Everything lives in `src/AgentArchitect.jsx`. About 16,000 lines as of this writing. Yes, that's unusual.
+
+The tradeoff was made deliberately:
+- **Pro**: paste into Claude.ai → tool runs. No build setup, no dependencies to resolve, no module graph. Anyone in the bootcamp can run it without being a developer
+- **Pro**: the entire codebase is greppable in 1 second. Want to find where guardrails get rendered? `grep -n "Guardrails" src/AgentArchitect.jsx`. No jumping between files
+- **Con**: the file is large. Most editors handle it but old machines may slow down on certain operations
+- **Con**: contribution friction. No clear file boundaries means contributors need orientation
+
+If you fork to extend it heavily, splitting into modules is reasonable. The Claude-paste path will need a bundler at that point.
+
+## What lives where
+
+The file is organised top-to-bottom roughly by concern. Approximate landmarks (line numbers drift as the file grows; use grep to find current positions):
+
+```
+1                    React imports, useState/useEffect/useMemo/useRef
+2-100                Theme tokens (T object), level definitions, design constants
+100-500              Reference data: WORKED_AGENTS, ROADMAP_TEMPLATES, KNOWLEDGE_TEMPLATES
+500-900              Utility functions: ideaInline, fmtField, recommendKnowledge, etc.
+900-1500             Inference helpers (inferShape, recommendModel, applyInference)
+1500-2000            Storage hook (useStore) and EMPTY card schema
+2000-2500            Sidebar component, navigation, card list with X delete
+2500-3500            MapMyAI panel (the mind-map view)
+3500-4500            RoadmapPanel + PortfolioVisualMap (current-vs-future)
+4500-6000            PromptsPanel, prompt builders for each autonomy level
+6000-7000            buildSkillMd, buildClaudeProject (Skill MD generators)
+7000-8500            OperatingCardPanel, SelfCritiquePanel
+8500-9500            DiagnosePanel, AskAiPanel
+9500-10500           SettingsPanel, AutonomyTrackerPanel
+10500-12000          DiscoverPanel, BusinessContextPanel, ImplementationPanel
+12000-13000          Scan prompt builders (11 of them) for the AskAi panel
+13000-14500          buildBusinessJustification, exportPlaybook
+14500-15500          GanttView, CalendarView, BrandFooter
+15500-16000          Wrapper App, CSS-in-JS, animations
+16000+               Module exports (test-only)
+```
+
+## Key data shapes
+
+**`EMPTY`** — the default shape of a workflow card. Defined around line 1789. Includes `cardId`, `cardName`, `idea`, `agentName`, `output`, `systems`, `customSystems`, `targetLevel`, `currentLevel`, `qa` (sub-object with rules), `business` (sub-object), `team` (array), `guardrailsConsidered`, `graduationChecks`, plus a few dozen more fields.
+
+**`useStore` hook** — the central state container. Wraps an array of cards in `useState`, syncs to `window.storage` (or `localStorage` if running locally). Returns `{ cards, active, activeId, setActiveId, update, create, remove, reset, replaceAll, loaded, savedAt }`.
+
+**`WORKED_AGENTS`** — reference content for 4 archetype agents (doc/Donna, message/Bosh, crm/Hermione, data/Athena). Used as fallback when the user hasn't filled in their own QA rules.
+
+## Storage
+
+Multiple storage keys, all under the `prompt-architect:` namespace:
+
+- `prompt-architect:v2` — main card store + activeId
+- `prompt-architect:settings:v1` — user preferences
+- `prompt-architect:trackers:v1` — autonomy trackers
+- `prompt-architect:stages:v1` — portfolio pipeline
+- `prompt-architect:discover:v1` — Discover panel state
+- `prompt-architect:nav-collapse:v1` — collapsed nav groups
+
+All write through `window.storage` (Claude artefact) or fall through to `localStorage` (Vite dev). Reads are async; the `loaded` flag in each hook tells you when initial state has hydrated.
+
+## Adding a new panel
+
+1. Decide which group it lives in: Program / Design / Ship / Iterate
+2. Add an entry to `TOOLBOX` (around line 2179). Include `id`, `label`, `sub`, `icon`, `group`
+3. Write the panel component as a function. It receives `{ card, update, setView, store, settings }` props
+4. Add a route in the `Router` switch (search for `function Router` to find it)
+5. Test the render with the mock UAT pattern in earlier PR descriptions
+
+A panel typically has:
+- Header section with `<ToolHeader>`, eyebrow, intro
+- One or more `<Card>` sections with content
+- Optional `<ExportBar>` at the bottom for copy/download/email
+- Bottom panel-pair links to next logical step (`Open [next panel] →`)
+
+## Adding a new scan prompt
+
+1. Write the builder function (see `buildScan_PromptQuality` for a model). Returns a markdown string with the user's card data interpolated
+2. Add an entry to `SCAN_LIBRARY` (around line 12450) with `id`, `name`, `eyebrow`, `description`, `builder` (your function name)
+3. The AskAiPanel automatically picks it up
+
+The elite-grade pattern for scan prompts: structured output format with exact section headers, hard scope caps (top 3 / max 4), anti-flattery rules ("don't soften the verdict"), what-NOT-to-do section, what-to-do-with-the-output guidance.
+
+## Adding a new generator (Skill MD-style export)
+
+1. Write the builder function. Returns a markdown string
+2. Add it to a panel's ExportBar via the `text={builder(...)}` prop
+3. The ExportBar handles copy-to-clipboard, download-as-file, email
+
+## Common patterns
+
+**Button styles**: prefer the project's design tokens (`T.primary`, `T.bg`, etc.) over hardcoded colors. Look at any existing button for the canonical pattern.
+
+**Touch targets**: minimum 32×32 for buttons; 44×44 preferred for primary CTAs. The X delete button is 32px because the card row sets the height; primary CTAs in panels use `minHeight: 44`.
+
+**Mobile breakpoints**: a few `@media (max-width: 768px)` rules in the global CSS-in-JS at the bottom. Most layout uses flex with `flexWrap` so it adapts without explicit breakpoints.
+
+**Em-dashes**: zero allowed in the codebase. The build pipeline includes a sweep step that catches them; replace with comma-comma or just comma. This is a deliberate constraint to keep voice consistent.
+
+## Testing
+
+There's no Jest/Vitest setup. The validation pattern across the project is:
+
+1. Babel-transform the JSX at `/home/claude/working.jsx`
+2. Module-stub `require("react")` so the file evaluates as Node
+3. Use ReactDOMServer.renderToStaticMarkup to render each panel with mock props
+4. Assert that every panel renders to >100 chars (catches blank-screen regressions)
+5. Assert specific UI elements appear in rendered HTML where they should
+
+For a prod-quality fork, replacing this with real Vitest + React Testing Library is the right move.
+
+## What I'd do differently if I started over
+
+- Split into modules from day 1. The single-file decision was right for the audience but painful for development.
+- Use Zustand or similar for state. The prop-drilling through panels works but gets cumbersome.
+- Build with Vite from the start, generate the artefact bundle separately.
+- Write proper tests instead of the render-and-assert pattern.
+
+If you're forking and have these skills, the file is decomposable. The boundaries between panels are clean; refactoring into one file per panel is mostly mechanical.

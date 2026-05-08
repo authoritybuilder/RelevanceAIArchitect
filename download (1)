@@ -1,0 +1,74 @@
+# Running Agent Architect as a Claude Artefact
+
+The fastest way to use this tool is to paste it into Claude.ai and run it as an artefact. About 60 seconds, no install needed.
+
+## What you'll need
+
+- A free or paid [Claude.ai](https://claude.ai) account
+- The contents of [`src/AgentArchitect.jsx`](../src/AgentArchitect.jsx)
+
+That's it. No Node, no npm, no build tools.
+
+## Step by step
+
+1. **Open Claude.ai.** Start a new chat (or use an existing one — the artefact will live in that chat thread).
+
+2. **Copy the file.** Open `src/AgentArchitect.jsx` from this repo, select all, copy. The file is ~880KB — Claude's chat input handles this without issue.
+
+3. **Paste into Claude.** Send a message that includes the pasted code. The simplest prompt that works:
+
+   ```
+   Please run this as a React artifact:
+
+   [paste the AgentArchitect.jsx code here]
+   ```
+
+4. **Wait for the artefact to render.** Claude will open the artefact panel on the right side of the chat. The tool is ready when you see the workspace header "Agent Architect".
+
+5. **Bookmark the chat.** Important: artefacts persist within a specific chat. If you start a new chat, you start a new artefact with empty data. Bookmark this chat or pin it so you come back to the same one.
+
+## How your data persists
+
+Agent Architect uses Claude's `window.storage` API for persistence. Your workflows, settings, trackers, and all panel state save automatically as you work. Nothing leaves the page; nothing goes to a server.
+
+**Important:** the storage is scoped to **the specific chat the artefact runs in**. If you delete that chat, your data goes with it. If you start a new chat with a fresh paste, you start with empty data.
+
+For multi-device use, copy your "Workflow JSON" out via Settings → Export, paste into the new device's instance.
+
+## Troubleshooting
+
+**The artefact didn't appear after I sent the message.**
+Sometimes Claude responds in text first ("I'll create this artefact for you...") and then renders. Wait 5-10 seconds. If still nothing, ask Claude: *"Please render the React code I sent as an artifact."*
+
+**The artefact rendered but shows an error.**
+Most likely a copy-paste truncation. Re-copy the full file (it's about 16,000 lines / 880 KB) and try again. If you're on a low-memory device, paste smaller chunks isn't an option here — the file has to go in whole because it's a single React component.
+
+**My data disappeared.**
+Three causes:
+1. **Different chat.** Make sure you're in the same chat where you originally ran the artefact
+2. **Different device.** Storage is per-device. Use Settings → Export/Import to move data
+3. **Cleared browser data.** Browser cache clears can wipe artefact storage. Export periodically as backup
+
+**The X delete buttons don't work.**
+This was an early bug — the fix involves a two-click "Sure?" pattern instead of a modal dialog. Make sure you're on the latest version. The current version is in `src/AgentArchitect.jsx` of this repo.
+
+**It's slow on mobile.**
+The tool is designed mobile-first but the 16,000-line single-file architecture is heavy for older phones. If you're on an older device and panels feel sluggish, try the Vite dev path locally — Vite tree-shakes unused code and runs faster.
+
+## Bookmarking and returning
+
+Once the artefact is rendering, the chat URL becomes a permanent link to your workspace. Bookmark it. Pin it. Treat it like any other workspace tab.
+
+Some users keep two chats open — one with the artefact, one for actually talking to Claude about their builds. That works well; the artefact chat doesn't need to also be where you ask questions.
+
+## Updating to a newer version
+
+When the repo gets a new version of `AgentArchitect.jsx`:
+
+1. **Export your data first.** Settings → Export. Save the JSON somewhere.
+2. Start a new chat in Claude.
+3. Paste the new version of `AgentArchitect.jsx`.
+4. In the new artefact, go to Settings → Import, paste your saved JSON.
+5. You're back to where you were, on the new version.
+
+This is the cost of single-file artefact architecture: there's no auto-update. Worth it for the no-install simplicity.

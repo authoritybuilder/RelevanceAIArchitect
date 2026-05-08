@@ -1,0 +1,58 @@
+/**
+ * Vite entry point for Agent Architect.
+ *
+ * The artefact source (AgentArchitect.jsx) was built to run inside
+ * Claude.ai, which exposes window.storage for persistence. When running
+ * locally via Vite or hosted on GitHub Pages, we shim window.storage to
+ * use localStorage so the tool persists the same way it does in Claude.
+ */
+
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './AgentArchitect.jsx';
+
+// localStorage shim for window.storage, matches the API the artefact expects
+if (typeof window !== 'undefined' && !window.storage) {
+  window.storage = {
+    async get(key) {
+      const value = localStorage.getItem(key);
+      return value === null ? null : { key, value, shared: false };
+    },
+    async set(key, value, shared = false) {
+      localStorage.setItem(key, value);
+      return { key, value, shared };
+    },
+    async delete(key, shared = false) {
+      const existed = localStorage.getItem(key) !== null;
+      localStorage.removeItem(key);
+      return { key, deleted: existed, shared };
+    },
+    async list(prefix = '', shared = false) {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!prefix || (key && key.startsWith(prefix))) keys.push(key);
+      }
+      return { keys, prefix, shared };
+    }
+  };
+}
+
+const rootElement = document.getElementById('root');
+ReactDOM.createRoot(rootElement).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+// Fade out the loading screen once React has mounted.
+// requestAnimationFrame ensures the first paint has happened.
+requestAnimationFrame(() => {
+  requestAnimationFrame(() => {
+    const loader = document.getElementById('pa-loader');
+    if (loader) {
+      loader.classList.add('hidden');
+      setTimeout(() => loader.remove(), 350);
+    }
+  });
+});
