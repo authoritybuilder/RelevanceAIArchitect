@@ -2340,6 +2340,10 @@ const Sidebar = ({ store, view, setView, mobileOpen, setMobileOpen }) => {
   };
 
   const cards = store.cards || [];
+  const VISIBLE_CARDS_LIMIT = 5;
+  const [showAllCards, setShowAllCards] = useState(false);
+  const visibleCards = showAllCards ? cards : cards.slice(0, VISIBLE_CARDS_LIMIT);
+  const hiddenCount = Math.max(0, cards.length - VISIBLE_CARDS_LIMIT);
 
   return (
     <aside
@@ -2492,7 +2496,7 @@ const Sidebar = ({ store, view, setView, mobileOpen, setMobileOpen }) => {
               paddingRight: 2,
               flexShrink: 1
             }} className="pa-cards-scroll">
-            {cards.map(c => {
+            {visibleCards.map(c => {
               const active = c.cardId === store.activeId;
               const showDelete = cards.length > 1;
               const isArmed = armedDeleteId === c.cardId;
@@ -2584,6 +2588,57 @@ const Sidebar = ({ store, view, setView, mobileOpen, setMobileOpen }) => {
                 </div>
               );
             })}
+            {hiddenCount > 0 && !showAllCards && (
+              <button
+                type="button"
+                onClick={() => setShowAllCards(true)}
+                style={{
+                  width: "100%",
+                  background: T.bgSubtle, color: T.textMid,
+                  border: `1px dashed ${T.border}`, borderRadius: 8,
+                  padding: "8px 10px", marginTop: 4, marginBottom: 4,
+                  fontFamily: "'Inter', sans-serif", fontSize: 11.5, fontWeight: 600,
+                  cursor: "pointer", textAlign: "center",
+                  transition: "all 0.15s ease"
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = T.bgWash}
+                onMouseLeave={e => e.currentTarget.style.background = T.bgSubtle}
+              >
+                + {hiddenCount} more workflow{hiddenCount === 1 ? "" : "s"}
+              </button>
+            )}
+            {hiddenCount > 0 && showAllCards && (
+              <button
+                type="button"
+                onClick={() => setShowAllCards(false)}
+                style={{
+                  width: "100%",
+                  background: "transparent", color: T.textLow,
+                  border: "none",
+                  padding: "6px 10px", marginTop: 4, marginBottom: 4,
+                  fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 500,
+                  cursor: "pointer", textAlign: "center"
+                }}
+              >
+                Show only {VISIBLE_CARDS_LIMIT}
+              </button>
+            )}
+            {cards.length >= VISIBLE_CARDS_LIMIT && (
+              <button
+                type="button"
+                onClick={() => setView("tracker")}
+                style={{
+                  width: "100%",
+                  background: "transparent", color: T.primary,
+                  border: "none",
+                  padding: "8px 10px", marginTop: 2,
+                  fontFamily: "'Inter', sans-serif", fontSize: 11.5, fontWeight: 600,
+                  cursor: "pointer", textAlign: "center"
+                }}
+              >
+                Open Tracker for full view →
+              </button>
+            )}
             </div>
           </div>
 
@@ -3009,6 +3064,241 @@ function PushToTracker({ card, update }) {
         }}>Cancel</button>
       </div>
     </Card>
+  );
+}
+
+/* ─────────────────────  ADVANCE LEVEL  ─────────────────────
+   Lets the user lift their currentLevel inside the build flow without
+   leaving the wizard. Mirrors any changes back to the linked Autonomy
+   Tracker task so the tracker stays synchronised with the build state.
+
+   The "graduate" semantics: each click moves currentLevel up one rung
+   (L0 -> L1 -> L2 -> ...) until it reaches targetLevel. The button
+   disables at the target. Going BACK is supported via a small step-down
+   link, since real life sometimes requires it. */
+
+function AdvanceLevel({ card, update, embedded = false }) {
+  const trackers = useTrackers();
+  const cur = card.currentLevel || "L0";
+  const tgt = card.targetLevel || "L2";
+  const curN = parseInt(cur.slice(1), 10) || 0;
+  const tgtN = parseInt(tgt.slice(1), 10) || 2;
+  const atTarget = curN >= tgtN;
+  const nextLevel = atTarget ? null : `L${curN + 1}`;
+  const prevLevel = curN > 0 ? `L${curN - 1}` : null;
+
+  // If linked to a tracker, mirror the score change there
+  const syncTracker = (newLevelStr) => {
+    const newScore = parseInt(newLevelStr.slice(1), 10) || 0;
+    const link = card.linkedTrackerTask || card.originTrackerTask;
+    if (!link || !trackers || !trackers.updateScore) return;
+    try {
+      trackers.updateScore(link.trackerId, link.stageId, link.taskId, newScore);
+    } catch (e) { /* fail silently, tracker may have been deleted */ }
+  };
+
+  const advance = () => {
+    if (atTarget || !nextLevel) return;
+    update({ currentLevel: nextLevel });
+    syncTracker(nextLevel);
+  };
+
+  const stepDown = () => {
+    if (!prevLevel) return;
+    update({ currentLevel: prevLevel });
+    syncTracker(prevLevel);
+  };
+
+  return (
+    <Card padding="18px 22px" style={{
+      marginTop: embedded ? 14 : 18,
+      background: atTarget ? T.goodSoft : T.bgWash,
+      borderLeft: `3px solid ${atTarget ? T.good : T.primary}`
+    }}>
+      <Mono color={atTarget ? T.good : T.primary} size={9} style={{ display: "block", marginBottom: 6 }}>
+        {atTarget ? "AT TARGET" : "ADVANCE TRACKER STATUS"}
+      </Mono>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: T.textHi, fontFamily: "'Inter', sans-serif", lineHeight: 1.3 }}>
+            {atTarget
+              ? `You're at ${cur}, your target.`
+              : `Currently ${cur}. Target ${tgt}.`}
+          </div>
+          <div style={{ fontSize: 12, color: T.textMid, marginTop: 4, fontFamily: "'Inter', sans-serif", lineHeight: 1.5 }}>
+            {atTarget
+              ? "When you're ready to push higher, set a new target in Roadmap. The Cohesion view shows your portfolio against this build."
+              : nextLevel === tgt
+                ? `Click below when this build is shipping at ${nextLevel}. It's your target, the Autonomy Tracker auto-syncs.`
+                : `Click below when this build is shipping at ${nextLevel}. Keep advancing until ${tgt}.`}
+          </div>
+          {(card.linkedTrackerTask || card.originTrackerTask) && (
+            <div style={{ fontSize: 10.5, color: T.textLow, marginTop: 6, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.06em" }}>
+              SYNCS WITH: {(card.linkedTrackerTask || card.originTrackerTask).trackerName}, {(card.linkedTrackerTask || card.originTrackerTask).stageName}
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {!atTarget && (
+            <PrimaryButton onClick={advance}>
+              Advance to {nextLevel} →
+            </PrimaryButton>
+          )}
+          {prevLevel && curN > 0 && (
+            <button onClick={stepDown} style={{
+              background: "transparent", color: T.textLow,
+              border: `1px solid ${T.border}`, borderRadius: 999,
+              padding: "5px 12px", fontSize: 11, fontWeight: 600,
+              fontFamily: "'Inter', sans-serif", cursor: "pointer"
+            }}
+            title="Step the tracker back one level. Use this if the build regressed.">
+              ← {prevLevel}
+            </button>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/* ─────────────────────  AGENT PICKER  ─────────────────────
+   Compact dropdown that lets the user switch the active workflow without
+   leaving the current panel. Used in Diagnose and Ask your AI so the
+   question/diagnosis is bound to a specific agent from the user's
+   portfolio, not always the most recently opened one.
+
+   Shows: agent name, target level, output shape. Highlights the active
+   agent. Provides a brief "context strip" below the dropdown showing
+   what's loaded so the user can sanity-check before they ask. */
+
+function AgentPicker({ store, eyebrow = "WORKING ON" }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  const cards = (store && store.cards) || [];
+  const active = (store && store.active) || cards[0] || null;
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  if (!active || cards.length <= 1) {
+    // If only one workflow exists, show a static label (no picker needed)
+    if (active) {
+      return (
+        <div style={{
+          marginBottom: 14, padding: "10px 14px",
+          background: T.bgSubtle, borderRadius: 8, borderLeft: `3px solid ${T.primary}`,
+          fontFamily: "'Inter', sans-serif"
+        }}>
+          <Mono color={T.textLow} size={9} style={{ display: "block", marginBottom: 4 }}>{eyebrow}</Mono>
+          <div style={{ fontSize: 13, color: T.textHi, fontWeight: 700 }}>
+            {active.cardName || active.agentName || "Untitled workflow"}
+          </div>
+          <div style={{ fontSize: 11, color: T.textMid, marginTop: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.06em" }}>
+            {active.currentLevel || "L0"} → {active.targetLevel || "L2"} · {({ doc: "Document", message: "Message", crm: "CRM update", data: "Data row", other: "Custom" })[active.output] || "Output"}
+          </div>
+        </div>
+      );
+    }
+    return null;
+  }
+
+  // Output shape pill colours
+  const outputColor = ({ doc: T.warn, message: T.bad, crm: T.info, data: T.accent })[active.output] || T.textMid;
+  const outputLabel = ({ doc: "Document", message: "Message", crm: "CRM update", data: "Data row", other: "Custom" })[active.output] || "Output";
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative", marginBottom: 14 }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        style={{
+          width: "100%", textAlign: "left",
+          padding: "10px 14px",
+          background: T.bgSubtle, borderRadius: 8,
+          borderLeft: `3px solid ${T.primary}`,
+          border: open ? `1px solid ${T.primary}` : `1px solid ${T.border}`,
+          borderLeftWidth: 3, borderLeftColor: T.primary,
+          cursor: "pointer", fontFamily: "'Inter', sans-serif",
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Mono color={T.textLow} size={9} style={{ display: "block", marginBottom: 4 }}>{eyebrow} ({cards.length} workflows)</Mono>
+          <div style={{ fontSize: 13, color: T.textHi, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {active.cardName || active.agentName || "Untitled workflow"}
+          </div>
+          <div style={{ fontSize: 11, color: T.textMid, marginTop: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.06em" }}>
+            {active.currentLevel || "L0"} → {active.targetLevel || "L2"} · <span style={{ color: outputColor }}>{outputLabel}</span>
+          </div>
+        </div>
+        <span aria-hidden="true" style={{
+          fontSize: 12, color: T.textMid,
+          transform: open ? "rotate(180deg)" : "rotate(0deg)",
+          transition: "transform 0.15s ease"
+        }}>▾</span>
+      </button>
+      {open && (
+        <div role="listbox" style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
+          background: T.bg, border: `1px solid ${T.border}`,
+          borderRadius: 8, zIndex: 50,
+          boxShadow: "0 8px 24px rgba(12,22,47,0.10)",
+          maxHeight: 320, overflowY: "auto",
+          padding: 4
+        }}>
+          {cards.map(c => {
+            const isActive = c.cardId === active.cardId;
+            const cOutputColor = ({ doc: T.warn, message: T.bad, crm: T.info, data: T.accent })[c.output] || T.textMid;
+            return (
+              <button
+                key={c.cardId}
+                role="option"
+                aria-selected={isActive}
+                type="button"
+                onClick={() => { store.setActiveId(c.cardId); setOpen(false); }}
+                style={{
+                  width: "100%", textAlign: "left",
+                  padding: "9px 12px",
+                  background: isActive ? T.primarySoft : "transparent",
+                  border: "none", borderRadius: 6,
+                  cursor: "pointer", fontFamily: "'Inter', sans-serif",
+                  marginBottom: 2,
+                  transition: "background 0.12s ease"
+                }}
+                onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = T.bgWash; }}
+                onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "transparent"; }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: cOutputColor, flexShrink: 0 }} />
+                  <span style={{ fontSize: 12.5, fontWeight: isActive ? 700 : 500, color: T.textHi, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                    {c.cardName || c.agentName || "Untitled workflow"}
+                  </span>
+                  {isActive && (
+                    <Mono color={T.primary} size={9}>SELECTED</Mono>
+                  )}
+                </div>
+                <div style={{
+                  fontSize: 10.5, color: T.textLow, marginTop: 2, marginLeft: 14,
+                  fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.06em"
+                }}>
+                  {c.currentLevel || "L0"} → {c.targetLevel || "L2"}
+                  {c.idea ? " · " + (c.idea.length > 40 ? c.idea.slice(0, 39) + "…" : c.idea) : ""}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -4472,6 +4762,9 @@ function RoadmapPanel({ card, update, setView, embedded = false, store }) {
           )}
         </div>
       </Card>
+
+      {/* Advance status, the action people came for */}
+      {!embedded && <AdvanceLevel card={card} update={update} />}
 
       {/* Portfolio visual: current state vs L4 future state */}
       {!embedded && (
@@ -7254,11 +7547,17 @@ function OperatingCardPanel({ card, update, setView, embedded = false }) {
                   : "a self-monitoring agent that proposes improvements for human approval";
 
   // Executive summary, narrative paragraph that ties workflow + business + level + risk
-  const execSummary = `${card.agentName || "This agent"} is being built to ${ideaInline(card.idea || ex.workflow)}. The team currently performs this work manually; the build encodes the repeatable parts and routes the judgement parts through a human gate. Target autonomy is **${card.targetLevel} ${targetName}**, ${lvlBlurb}. ${card.targetLevel === "L1" || card.targetLevel === "L2" ? "Risk is low: a human edits or approves every output." : card.targetLevel === "L3" ? "Risk is moderate: the agent runs unattended, so the trigger filter and stop conditions must be conservative on day one." : "Risk is subtle: at L4 the agent self-monitors, so independent human review on a sample is load-bearing."} Cost of error is ${card.costOfError || "moderate"}; ease of review is ${card.easeOfReview || "moderate"}.`;
+  // Stance over description. Lead with the action. Cut every word that doesn't work.
+  const riskLine = card.targetLevel === "L1" || card.targetLevel === "L2"
+    ? "A human edits or approves every output. The risk is low because the gate is in front."
+    : card.targetLevel === "L3"
+      ? "The agent runs unattended. The risk lives in the trigger filter and the stop conditions; both have to be conservative on day one."
+      : "The agent monitors its own work. Independent human review on a sample is what catches what the self-score misses, so it can't be optional.";
+  const execSummary = `${card.agentName || "This agent"} ${ideaInline(card.idea || ex.workflow)}. Today this work happens by hand; the build hands the repeatable parts to the agent and keeps the judgement parts behind a human gate. Target: **${card.targetLevel} ${targetName}**, ${lvlBlurb} ${riskLine} Cost of error is ${card.costOfError || "moderate"}. Ease of review is ${card.easeOfReview || "moderate"}.`;
 
   const text = `# Operating Card: ${card.agentName || card.cardName || "Untitled agent"}
 
-> Strategic artefact for the ${card.targetLevel || "L2"} build. Bring this to the manager review. If a stakeholder pushes back on any field, that field needs work, not the agent.
+> One page. Bring it to the manager review. If a stakeholder pushes back on any field, the field needs work, not the agent.
 
 ## Executive summary
 
@@ -7266,11 +7565,11 @@ ${execSummary}
 
 ---
 
-## Voice and tone calibration (the psychographic layer)
+## Voice calibration
 
-> **Why this matters first:** The single most reliable way to make an agent's output sound human, on-brand, and trusted is to anchor it to the actual writing voice of the person or team the agent is replacing. Generic-corporate is the failure state.
+> Generic-corporate is the failure state. Before this agent ships, calibrate its voice against samples of the actual humans it's standing in for. Otherwise it sounds like every other AI everyone is already tired of.
 
-Before this agent ships, calibrate its voice using the prompt below. Paste it into Claude (or your preferred AI client) along with 3-10 samples of the writing this agent will replace, sales emails, internal Slack messages, customer support replies, whatever the actual humans currently send.
+Paste the prompt below into Claude (or your AI of choice) along with 3-10 real writing samples from the team this agent is replacing. Sales emails, internal Slack messages, customer support replies, whatever the actual humans currently send.
 
 ### Prompt: extract the natural voice fingerprint
 
@@ -7602,9 +7901,9 @@ Re-read this card every time you change the prompt. If the prompt changes but th
           display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10
         }}>
           <div>
-            <Mono color={T.good} size={10}>STAKEHOLDER MEMO, AUTO-WRITTEN</Mono>
+            <Mono color={T.good} size={10}>OPERATING CARD</Mono>
             <div style={{ fontSize: 11.5, color: T.textMid, marginTop: 2, fontFamily: "'Inter', sans-serif" }}>
-              Reads as a senior would write it. Edit any field that doesn't match the truth on the ground, then send.
+              One page. The version your manager will read. Edit anything below that doesn't match the truth on the ground.
             </div>
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -7850,7 +8149,7 @@ Don't just restate the standard fix. Walk through this specific case and give me
 Direct. No hedging. If I should escalate to the platform team or rebuild from scratch, say so. The kind of advice that costs time to read but saves more time to follow.`;
 }
 
-function DiagnosePanel({ card, update, setView, embedded = false }) {
+function DiagnosePanel({ card, update, setView, store, embedded = false }) {
   const active = card.diagFailureLayer;
   const log = card.diagnosisLog || [];
 
@@ -7891,6 +8190,8 @@ function DiagnosePanel({ card, update, setView, embedded = false }) {
           accent={T.bad}
         />
       )}
+
+      {!embedded && store && <AgentPicker store={store} eyebrow="DIAGNOSING" />}
 
       <Card padding="18px 20px" style={{ marginBottom: 20 }}>
         <Eyebrow color={T.bad}>STEP 1, DESCRIBE THE FAILURE</Eyebrow>
@@ -9341,6 +9642,76 @@ function CohesionPanel({ store, setView }) {
           <div style={{ fontSize: 11, color: T.textLow, fontFamily: "'Inter', sans-serif" }}>workflows in portfolio</div>
         </Card>
       </div>
+
+      {/* Portfolio CSV export, ships the entire workflow list as a spreadsheet */}
+      {(store.cards || []).length > 0 && (
+        <Card padding="12px 16px" style={{ marginBottom: 14, background: T.bgSubtle, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <Mono color={T.textLow} size={9}>EXPORT PORTFOLIO</Mono>
+            <div style={{ fontSize: 12, color: T.textMid, marginTop: 2, fontFamily: "'Inter', sans-serif" }}>
+              All {(store.cards || []).length} workflows as a spreadsheet. Open in Excel, Google Sheets, or any spreadsheet tool.
+            </div>
+          </div>
+          <button onClick={() => {
+            const cards = store.cards || [];
+            // CSV columns capture the planning view: name, idea, levels, output,
+            // owner, systems, key dates. Skip metadata fields, the owner doesn't
+            // need to see internal IDs.
+            const headers = [
+              "Workflow", "Owner", "Idea", "Output", "Current Level", "Target Level",
+              "Trigger Type", "Trigger", "Systems", "Cost of Error", "Ease of Review",
+              "Impact", "Complexity", "Planned Start", "Planned Ship", "Success Metric"
+            ];
+            const rows = [headers];
+            cards.forEach(c => {
+              const allSystems = [...(c.systems || []), ...(c.customSystems || [])].join("; ");
+              rows.push([
+                c.cardName || c.agentName || "Untitled",
+                c.ownerName || "",
+                c.idea || "",
+                ({ doc: "Document", message: "Message", crm: "CRM update", data: "Data row", other: "Custom" })[c.output] || "",
+                c.currentLevel || "L0",
+                c.targetLevel || "L2",
+                c.ttype || "manual",
+                (c.ttype === "other" && c.triggerOther) ? c.triggerOther : (c.trigger || "Manual"),
+                allSystems,
+                c.costOfError || "",
+                c.easeOfReview || "",
+                c.impact || "",
+                c.complexity || "",
+                c.plannedStart || "",
+                c.plannedShip || "",
+                (c.qa && c.qa.success_metric) || ""
+              ]);
+            });
+            const csv = rows.map(row => row.map(cell => {
+              const s = String(cell == null ? "" : cell);
+              // Quote if contains comma, quote, or newline
+              if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+              return s;
+            }).join(",")).join("\n");
+            try {
+              const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `agent-architect-portfolio-${new Date().toISOString().slice(0, 10)}.csv`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              setTimeout(() => URL.revokeObjectURL(url), 100);
+            } catch (e) {}
+          }} style={{
+            background: T.bg, color: T.textHi,
+            border: `1px solid ${T.border}`, borderRadius: 999,
+            padding: "8px 14px", fontSize: 12, fontWeight: 700,
+            fontFamily: "'Inter', sans-serif", cursor: "pointer",
+            flexShrink: 0
+          }}>
+            Download CSV ↓
+          </button>
+        </Card>
+      )}
 
       {/* Filter pills + actions */}
       {findings.length > 0 && (
@@ -11877,6 +12248,8 @@ function AskAiPanel({ card, store, setView }) {
         subtitle="Each scan is a prompt your AI client (Claude, ChatGPT, Gemini, anything) can answer better than this app can. Tap one to expand. Copy. Paste into your AI. Read the response."
         accent={T.accent}
       />
+
+      {store && <AgentPicker store={store} eyebrow="ASKING ABOUT" />}
 
       {/* Fill-rate banner, tells user how complete the auto-fill will be */}
       <Card padding="14px 18px" style={{
@@ -15729,6 +16102,7 @@ function WizardPanel({ card, update, setView, settings }) {
             <ClaudeProjectPanel card={card} update={update} embedded />
             <Hr />
             <OperatingCardPanel card={card} update={update} embedded />
+            <AdvanceLevel card={card} update={update} embedded />
             <Card padding="20px 24px" style={{
               marginTop: 18,
               background: `linear-gradient(135deg, ${T.bgWash} 0%, ${T.bg} 100%)`,
@@ -16028,7 +16402,7 @@ export default function App() {
       case "implementation": return <ImplementationPanel card={active} update={update} settings={settings} setView={setView} />;
       case "card":       return <OperatingCardPanel card={active} update={update} setView={setView} />;
       case "critique":   return <SelfCritiquePanel card={active} update={update} setView={setView} />;
-      case "diagnose":   return <DiagnosePanel card={active} update={update} setView={setView} />;
+      case "diagnose":   return <DiagnosePanel card={active} update={update} setView={setView} store={store} />;
       case "askai":      return <AskAiPanel card={active} store={store} setView={setView} />;
       case "stuck":      return <StuckPanel setView={setView} />;
       case "howto":      return <HowToPanel setView={setView} />;
